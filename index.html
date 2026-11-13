@@ -1,0 +1,688 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Scan to PDF</title>
+<meta name="theme-color" content="#0f172a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Scan to PDF">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232563eb'/%3E%3Cpath d='M10 7h8l5 5v13H10z' fill='%23fff'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #f4f5f7; --card: #ffffff; --text: #111827; --muted: #6b7280;
+    --line: #d9dce3; --accent: #2563eb; --accent-text: #ffffff; --danger: #dc2626;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1218; --card: #1a1f29; --text: #f1f3f7; --muted: #9aa3b2;
+      --line: #2c3442; --accent: #4f8cff; --accent-text: #0b1020; --danger: #f87171;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font: 16px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    min-height: 100dvh; display: flex; flex-direction: column;
+    -webkit-tap-highlight-color: transparent;
+  }
+  header {
+    display: flex; align-items: baseline; justify-content: space-between;
+    padding: calc(14px + env(safe-area-inset-top)) 16px 10px;
+  }
+  h1 { font-size: 22px; margin: 0; letter-spacing: -0.01em; }
+  #count { color: var(--muted); font-variant-numeric: tabular-nums; }
+  main { flex: 1; padding: 4px 16px 24px; }
+
+  #empty {
+    margin: 12vh auto 0; max-width: 300px; text-align: center; color: var(--muted);
+  }
+  #empty strong { display: block; color: var(--text); font-size: 18px; margin-bottom: 6px; }
+
+  #pages {
+    list-style: none; margin: 0; padding: 0;
+    display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  }
+  #pages li {
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden;
+  }
+  .thumb {
+    display: block; width: 100%; aspect-ratio: 3 / 4; padding: 0; border: 0; cursor: pointer;
+    background: #8881; position: relative;
+  }
+  .thumb img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .thumb span {
+    position: absolute; left: 8px; top: 8px; min-width: 24px; padding: 1px 7px; border-radius: 12px;
+    background: #000a; color: #fff; font-size: 13px; font-weight: 600;
+  }
+  .row { display: flex; border-top: 1px solid var(--line); }
+  .row button {
+    flex: 1; min-height: 42px; border: 0; background: none; color: var(--text);
+    font: inherit; font-size: 14px; cursor: pointer;
+  }
+  .row button + button { border-left: 1px solid var(--line); }
+  .row button:disabled { color: var(--line); }
+  .row .del { color: var(--danger); }
+
+  .bar {
+    position: sticky; bottom: 0; display: flex; gap: 8px;
+    padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+    background: var(--card); border-top: 1px solid var(--line);
+  }
+  .btn {
+    flex: 1; display: inline-flex; align-items: center; justify-content: center; text-align: center;
+    min-height: 48px; padding: 0 12px; border-radius: 12px; border: 1px solid var(--line);
+    background: var(--card); color: var(--text); font: inherit; font-weight: 600; cursor: pointer;
+    user-select: none; -webkit-user-select: none;
+  }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+  .btn[disabled], .btn.off { opacity: .45; pointer-events: none; }
+  .sr { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
+
+  dialog { color: var(--text); border: 0; padding: 0; }
+  dialog::backdrop { background: #000a; }
+
+  #editor {
+    width: 100vw; height: 100dvh; max-width: none; max-height: none; margin: 0;
+    background: #0b0d11; color: #fff; flex-direction: column;
+  }
+  #editor[open] { display: flex; }
+  .edbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px; }
+  .edbar.top { padding-top: calc(10px + env(safe-area-inset-top)); }
+  .edbar.bottom { padding-bottom: calc(10px + env(safe-area-inset-bottom)); justify-content: center; }
+  .edbar button {
+    min-height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid #fff3;
+    background: #fff1; color: #fff; font: inherit; font-weight: 600; cursor: pointer;
+  }
+  .edbar .done { background: #4f8cff; border-color: #4f8cff; color: #0b1020; }
+  #stage { flex: 1; min-height: 0; position: relative; touch-action: none; overflow: hidden; }
+  #wrap { position: absolute; }
+  #wrap canvas { display: block; width: 100%; height: 100%; }
+  #shade { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+  #hole { position: absolute; box-shadow: 0 0 0 9999px #000a; }
+  #box { position: absolute; border: 2px solid #fff; cursor: move; touch-action: none; }
+  .h { position: absolute; width: 44px; height: 44px; margin: -22px; touch-action: none; }
+  .h::after {
+    content: ""; position: absolute; inset: 13px; border-radius: 50%;
+    background: #fff; box-shadow: 0 0 0 1px #0006;
+  }
+  .h[data-h=nw] { left: 0; top: 0; cursor: nwse-resize; }
+  .h[data-h=n]  { left: 50%; top: 0; cursor: ns-resize; }
+  .h[data-h=ne] { left: 100%; top: 0; cursor: nesw-resize; }
+  .h[data-h=e]  { left: 100%; top: 50%; cursor: ew-resize; }
+  .h[data-h=se] { left: 100%; top: 100%; cursor: nwse-resize; }
+  .h[data-h=s]  { left: 50%; top: 100%; cursor: ns-resize; }
+  .h[data-h=sw] { left: 0; top: 100%; cursor: nesw-resize; }
+  .h[data-h=w]  { left: 0; top: 50%; cursor: ew-resize; }
+
+  #result {
+    width: min(92vw, 400px); border-radius: 16px; background: var(--card); padding: 20px;
+  }
+  #result h2 { margin: 0 0 2px; font-size: 20px; }
+  #result p { margin: 0 0 14px; color: var(--muted); }
+  #result label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+  #result input, #result select {
+    width: 100%; min-height: 44px; padding: 0 10px; margin-bottom: 14px; border-radius: 10px;
+    border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit;
+  }
+  #result .stack { display: grid; gap: 8px; }
+  #result .btn { width: 100%; }
+
+  #toast {
+    position: fixed; left: 50%; bottom: calc(84px + env(safe-area-inset-bottom)); transform: translateX(-50%);
+    max-width: 90vw; padding: 10px 14px; border-radius: 10px; background: #111c; color: #fff;
+    font-size: 14px; opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 10;
+  }
+  #toast.on { opacity: 1; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Scan to PDF</h1>
+  <span id="count">0 / 10</span>
+</header>
+
+<main>
+  <div id="empty">
+    <strong>No pages yet</strong>
+    Take a photo of each page, crop it if needed, then create a PDF to save or email. Up to 10 pages.
+  </div>
+  <ol id="pages"></ol>
+</main>
+
+<div class="bar">
+  <label class="btn" id="camBtn">Take photo
+    <input class="sr" type="file" id="cam" accept="image/*" capture="environment">
+  </label>
+  <label class="btn" id="libBtn">Photos
+    <input class="sr" type="file" id="lib" accept="image/*" multiple>
+  </label>
+  <button class="btn primary" id="make" disabled>Create PDF</button>
+</div>
+
+<dialog id="editor">
+  <div class="edbar top">
+    <button id="edCancel">Cancel</button>
+    <span id="edTitle">Crop</span>
+    <button id="edDone" class="done">Done</button>
+  </div>
+  <div id="stage">
+    <div id="wrap">
+      <div id="shade"><div id="hole"></div></div>
+      <div id="box">
+        <i class="h" data-h="n"></i><i class="h" data-h="e"></i><i class="h" data-h="s"></i><i class="h" data-h="w"></i>
+        <i class="h" data-h="nw"></i><i class="h" data-h="ne"></i><i class="h" data-h="se"></i><i class="h" data-h="sw"></i>
+      </div>
+    </div>
+  </div>
+  <div class="edbar bottom">
+    <button id="edRotate">Rotate ↻</button>
+    <button id="edReset">Reset crop</button>
+  </div>
+</dialog>
+
+<dialog id="result">
+  <h2>PDF ready</h2>
+  <p id="resInfo"></p>
+  <label for="fname">File name</label>
+  <input id="fname" type="text" autocomplete="off" autocapitalize="off" spellcheck="false">
+  <label for="psize">Page size</label>
+  <select id="psize">
+    <option value="letter">US Letter</option>
+    <option value="a4">A4</option>
+    <option value="fit">Fit to photo (no margins)</option>
+  </select>
+  <div class="stack">
+    <button class="btn primary" id="share">Email / Share</button>
+    <button class="btn" id="save">Save PDF</button>
+    <button class="btn" id="resClose">Back to pages</button>
+  </div>
+</dialog>
+
+<div id="toast" role="status"></div>
+
+<script>
+'use strict';
+const MAX_PAGES = 10;
+const STORE_DIM = 2200;   // longest side kept per captured photo
+const PDF_DIM = 1800;     // longest side written into the PDF (~160 dpi on Letter)
+const PDF_QUALITY = 0.8;
+const PAGE_SIZES = { letter: [612, 792], a4: [595.28, 841.89] };
+
+const $ = id => document.getElementById(id);
+const pages = [];         // { id, blob, w, h, crop:{x,y,w,h}, thumb }
+let nextId = 1;
+let pdfBlob = null;
+let busy = false;
+
+/* ---------- helpers ---------- */
+
+function toast(msg) {
+  const t = $('toast');
+  t.textContent = msg;
+  t.classList.add('on');
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => t.classList.remove('on'), 3500);
+}
+
+async function withImage(blob, fn) {
+  const url = URL.createObjectURL(blob);
+  try {
+    const img = new Image();
+    await new Promise((res, rej) => {
+      img.onload = res;
+      img.onerror = () => rej(new Error('That image could not be read.'));
+      img.src = url;
+    });
+    return await fn(img);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+function makeCanvas(w, h) {
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(w));
+  c.height = Math.max(1, Math.round(h));
+  return c;
+}
+
+function toJpeg(canvas, quality) {
+  return new Promise((res, rej) =>
+    canvas.toBlob(b => b ? res(b) : rej(new Error('Could not encode image.')), 'image/jpeg', quality));
+}
+
+// Draws the page's cropped region to a new canvas, longest side <= maxDim.
+function renderCrop(page, maxDim) {
+  return withImage(page.blob, img => {
+    const c = page.crop;
+    const s = Math.min(1, maxDim / Math.max(c.w, c.h));
+    const out = makeCanvas(c.w * s, c.h * s);
+    const ctx = out.getContext('2d');
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, out.width, out.height);
+    ctx.drawImage(img, c.x, c.y, c.w, c.h, 0, 0, out.width, out.height);
+    return out;
+  });
+}
+
+async function refreshThumb(page) {
+  const c = await renderCrop(page, 400);
+  const blob = await toJpeg(c, 0.7);
+  c.width = c.height = 0;
+  if (page.thumb) URL.revokeObjectURL(page.thumb);
+  page.thumb = URL.createObjectURL(blob);
+}
+
+function setBusy(on) {
+  busy = on;
+  update();
+}
+
+/* ---------- adding pages ---------- */
+
+async function addFiles(files) {
+  files = [...files];
+  if (!files.length) return;
+  const room = MAX_PAGES - pages.length;
+  if (files.length > room) {
+    toast(room > 0 ? `Only ${room} more page${room === 1 ? '' : 's'} fit — 10 page limit.` : '10 page limit reached.');
+    files = files.slice(0, room);
+  }
+  setBusy(true);
+  try {
+    for (const file of files) {
+      try {
+        const page = await withImage(file, async img => {
+          const iw = img.naturalWidth, ih = img.naturalHeight;
+          const s = Math.min(1, STORE_DIM / Math.max(iw, ih));
+          const c = makeCanvas(iw * s, ih * s);
+          const ctx = c.getContext('2d');
+          ctx.fillStyle = '#fff';
+          ctx.fillRect(0, 0, c.width, c.height);
+          ctx.drawImage(img, 0, 0, c.width, c.height);
+          const blob = await toJpeg(c, 0.9);
+          const p = { id: nextId++, blob, w: c.width, h: c.height, crop: { x: 0, y: 0, w: c.width, h: c.height }, thumb: null };
+          c.width = c.height = 0;
+          return p;
+        });
+        await refreshThumb(page);
+        pages.push(page);
+        pdfBlob = null;
+        update();
+      } catch (e) {
+        toast(e.message || 'That image could not be added.');
+      }
+    }
+  } finally {
+    setBusy(false);
+  }
+}
+
+for (const id of ['cam', 'lib']) {
+  $(id).addEventListener('change', e => {
+    const files = [...e.target.files];
+    e.target.value = '';
+    addFiles(files);
+  });
+}
+
+/* ---------- page list ---------- */
+
+function update() {
+  const list = $('pages');
+  list.textContent = '';
+  pages.forEach((p, i) => {
+    const li = document.createElement('li');
+
+    const thumb = document.createElement('button');
+    thumb.className = 'thumb';
+    thumb.setAttribute('aria-label', `Crop page ${i + 1}`);
+    const img = document.createElement('img');
+    img.src = p.thumb;
+    img.alt = '';
+    const num = document.createElement('span');
+    num.textContent = i + 1;
+    thumb.append(img, num);
+    thumb.onclick = () => openEditor(p);
+
+    const row = document.createElement('div');
+    row.className = 'row';
+    const mk = (label, aria, fn, cls) => {
+      const b = document.createElement('button');
+      b.textContent = label;
+      b.setAttribute('aria-label', aria);
+      if (cls) b.className = cls;
+      b.onclick = fn;
+      row.append(b);
+      return b;
+    };
+    mk('←', 'Move earlier', () => move(i, -1)).disabled = i === 0;
+    mk('→', 'Move later', () => move(i, 1)).disabled = i === pages.length - 1;
+    mk('Crop', 'Crop or rotate', () => openEditor(p));
+    mk('✕', 'Delete page', () => remove(i), 'del');
+
+    li.append(thumb, row);
+    list.append(li);
+  });
+
+  $('empty').hidden = pages.length > 0;
+  $('count').textContent = `${pages.length} / ${MAX_PAGES}`;
+  const full = pages.length >= MAX_PAGES;
+  $('camBtn').classList.toggle('off', full || busy);
+  $('libBtn').classList.toggle('off', full || busy);
+  $('make').disabled = !pages.length || busy;
+  $('make').textContent = busy ? 'Working…' : 'Create PDF';
+}
+
+function move(i, d) {
+  const j = i + d;
+  if (j < 0 || j >= pages.length) return;
+  [pages[i], pages[j]] = [pages[j], pages[i]];
+  pdfBlob = null;
+  update();
+}
+
+function remove(i) {
+  const [p] = pages.splice(i, 1);
+  if (p.thumb) URL.revokeObjectURL(p.thumb);
+  pdfBlob = null;
+  update();
+}
+
+/* ---------- crop / rotate editor ---------- */
+
+const ed = { page: null, canvas: null, crop: null, rotated: false, scale: 1 };
+
+async function openEditor(page) {
+  if (busy) return;
+  const canvas = await withImage(page.blob, img => {
+    const c = makeCanvas(page.w, page.h);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    return c;
+  });
+  ed.page = page;
+  ed.crop = { ...page.crop };
+  ed.rotated = false;
+  setEditorCanvas(canvas);
+  $('edTitle').textContent = `Page ${pages.indexOf(page) + 1}`;
+  $('editor').showModal();
+  layoutEditor();
+}
+
+function setEditorCanvas(canvas) {
+  if (ed.canvas) { ed.canvas.remove(); ed.canvas.width = ed.canvas.height = 0; }
+  ed.canvas = canvas;
+  $('wrap').prepend(canvas);
+}
+
+function layoutEditor() {
+  if (!ed.canvas) return;
+  const pad = 24;
+  const st = $('stage').getBoundingClientRect();
+  const W = ed.canvas.width, H = ed.canvas.height;
+  ed.scale = Math.min((st.width - pad * 2) / W, (st.height - pad * 2) / H);
+  const w = W * ed.scale, h = H * ed.scale;
+  const wrap = $('wrap').style;
+  wrap.width = w + 'px';
+  wrap.height = h + 'px';
+  wrap.left = (st.width - w) / 2 + 'px';
+  wrap.top = (st.height - h) / 2 + 'px';
+  drawCropBox();
+}
+
+function drawCropBox() {
+  const c = ed.crop, s = ed.scale;
+  for (const el of [$('box'), $('hole')]) {
+    el.style.left = c.x * s + 'px';
+    el.style.top = c.y * s + 'px';
+    el.style.width = c.w * s + 'px';
+    el.style.height = c.h * s + 'px';
+  }
+}
+
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+let drag = null;
+$('box').addEventListener('pointerdown', e => {
+  e.preventDefault();
+  drag = { mode: e.target.dataset.h || 'move', px: e.clientX, py: e.clientY, start: { ...ed.crop }, id: e.pointerId };
+  $('box').setPointerCapture(e.pointerId);
+});
+$('box').addEventListener('pointermove', e => {
+  if (!drag || e.pointerId !== drag.id) return;
+  const W = ed.canvas.width, H = ed.canvas.height;
+  const MIN = Math.min(W, H) * 0.08;
+  const dx = (e.clientX - drag.px) / ed.scale, dy = (e.clientY - drag.py) / ed.scale;
+  let { x, y, w, h } = drag.start;
+  const m = drag.mode;
+  if (m === 'move') {
+    x = clamp(x + dx, 0, W - w);
+    y = clamp(y + dy, 0, H - h);
+  } else {
+    let x2 = x + w, y2 = y + h;
+    if (m.includes('w')) x = clamp(x + dx, 0, x2 - MIN);
+    if (m.includes('e')) x2 = clamp(x2 + dx, x + MIN, W);
+    if (m.includes('n')) y = clamp(y + dy, 0, y2 - MIN);
+    if (m.includes('s')) y2 = clamp(y2 + dy, y + MIN, H);
+    w = x2 - x; h = y2 - y;
+  }
+  ed.crop = { x, y, w, h };
+  drawCropBox();
+});
+for (const ev of ['pointerup', 'pointercancel']) {
+  $('box').addEventListener(ev, e => { if (drag && e.pointerId === drag.id) drag = null; });
+}
+
+$('edRotate').onclick = () => {
+  const old = ed.canvas;
+  const c = makeCanvas(old.height, old.width);
+  const ctx = c.getContext('2d');
+  ctx.translate(c.width, 0);
+  ctx.rotate(Math.PI / 2);
+  ctx.drawImage(old, 0, 0);
+  // Carry the crop rectangle through the same 90° clockwise turn.
+  const k = ed.crop;
+  ed.crop = { x: old.height - (k.y + k.h), y: k.x, w: k.h, h: k.w };
+  ed.rotated = true;
+  setEditorCanvas(c);
+  layoutEditor();
+};
+
+$('edReset').onclick = () => {
+  ed.crop = { x: 0, y: 0, w: ed.canvas.width, h: ed.canvas.height };
+  drawCropBox();
+};
+
+function closeEditor() {
+  $('editor').close();
+  if (ed.canvas) { ed.canvas.remove(); ed.canvas.width = ed.canvas.height = 0; }
+  ed.canvas = ed.page = null;
+  drag = null;
+}
+
+$('edCancel').onclick = closeEditor;
+$('editor').addEventListener('cancel', e => { e.preventDefault(); closeEditor(); });
+
+$('edDone').onclick = async () => {
+  const page = ed.page, W = ed.canvas.width, H = ed.canvas.height;
+  try {
+    if (ed.rotated) {
+      page.blob = await toJpeg(ed.canvas, 0.9);
+      page.w = W; page.h = H;
+    }
+    const k = ed.crop;
+    const x = clamp(Math.round(k.x), 0, W - 1), y = clamp(Math.round(k.y), 0, H - 1);
+    page.crop = { x, y, w: clamp(Math.round(k.w), 1, W - x), h: clamp(Math.round(k.h), 1, H - y) };
+    closeEditor();
+    await refreshThumb(page);
+    pdfBlob = null;
+    update();
+  } catch (e) {
+    closeEditor();
+    toast(e.message || 'Could not save that edit.');
+  }
+};
+
+addEventListener('resize', () => { if ($('editor').open) layoutEditor(); });
+
+/* ---------- PDF writer (one JPEG per page, no dependencies) ---------- */
+
+function pageLayout(iw, ih, size) {
+  if (size === 'fit') {
+    const s = 612 / Math.min(iw, ih);
+    return { pw: iw * s, ph: ih * s, x: 0, y: 0, dw: iw * s, dh: ih * s };
+  }
+  let [pw, ph] = PAGE_SIZES[size] || PAGE_SIZES.letter;
+  if (iw > ih) [pw, ph] = [ph, pw];
+  const m = 18;
+  const s = Math.min((pw - 2 * m) / iw, (ph - 2 * m) / ih);
+  const dw = iw * s, dh = ih * s;
+  return { pw, ph, x: (pw - dw) / 2, y: (ph - dh) / 2, dw, dh };
+}
+
+async function buildPdf(size) {
+  const enc = new TextEncoder();
+  const parts = [];
+  const offsets = [];
+  let len = 0;
+  const push = d => { if (typeof d === 'string') d = enc.encode(d); parts.push(d); len += d.length; };
+  const begin = n => { offsets[n] = len; push(`${n} 0 obj\n`); };
+  const end = () => push('\nendobj\n');
+  const f = n => n.toFixed(2);
+
+  const n = pages.length;
+  push('%PDF-1.4\n%âãÏÓ\n');
+
+  begin(1); push('<< /Type /Catalog /Pages 2 0 R >>'); end();
+  begin(2);
+  push(`<< /Type /Pages /Count ${n} /Kids [${pages.map((_, i) => `${3 + i * 3} 0 R`).join(' ')}] >>`);
+  end();
+
+  for (let i = 0; i < n; i++) {
+    const canvas = await renderCrop(pages[i], PDF_DIM);
+    const iw = canvas.width, ih = canvas.height;
+    const jpeg = new Uint8Array(await (await toJpeg(canvas, PDF_QUALITY)).arrayBuffer());
+    canvas.width = canvas.height = 0;
+
+    const L = pageLayout(iw, ih, size);
+    const pageNo = 3 + i * 3, contentNo = pageNo + 1, imageNo = pageNo + 2;
+    const content = `q ${f(L.dw)} 0 0 ${f(L.dh)} ${f(L.x)} ${f(L.y)} cm /Im0 Do Q`;
+
+    begin(pageNo);
+    push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${f(L.pw)} ${f(L.ph)}] ` +
+         `/Resources << /XObject << /Im0 ${imageNo} 0 R >> >> /Contents ${contentNo} 0 R >>`);
+    end();
+
+    begin(contentNo);
+    push(`<< /Length ${content.length} >>\nstream\n${content}\nendstream`);
+    end();
+
+    begin(imageNo);
+    push(`<< /Type /XObject /Subtype /Image /Width ${iw} /Height ${ih} /ColorSpace /DeviceRGB ` +
+         `/BitsPerComponent 8 /Filter /DCTDecode /Length ${jpeg.length} >>\nstream\n`);
+    push(jpeg);
+    push('\nendstream');
+    end();
+  }
+
+  const total = 2 + n * 3;
+  const xref = len;
+  let table = `xref\n0 ${total + 1}\n0000000000 65535 f \n`;
+  for (let k = 1; k <= total; k++) table += String(offsets[k]).padStart(10, '0') + ' 00000 n \n';
+  push(table);
+  push(`trailer\n<< /Size ${total + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`);
+
+  return new Blob(parts, { type: 'application/pdf' });
+}
+
+/* ---------- create / save / share ---------- */
+
+function getPageSize() {
+  try { return localStorage.getItem('pageSize') || 'letter'; } catch { return 'letter'; }
+}
+
+function defaultName() {
+  const d = new Date();
+  const p = v => String(v).padStart(2, '0');
+  return `Scan ${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+function fileName() {
+  let name = $('fname').value.trim().replace(/[\\/:*?"<>|]+/g, '-') || defaultName();
+  if (!/\.pdf$/i.test(name)) name += '.pdf';
+  return name;
+}
+
+function pdfFile() {
+  return new File([pdfBlob], fileName(), { type: 'application/pdf' });
+}
+
+function formatSize(bytes) {
+  return bytes < 1048576 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1048576).toFixed(1)} MB`;
+}
+
+async function makePdf(force) {
+  if (!pages.length || busy) return;
+  setBusy(true);
+  for (const id of ['share', 'save']) $(id).disabled = true;
+  try {
+    if (!pdfBlob || force) pdfBlob = await buildPdf(getPageSize());
+    $('resInfo').textContent = `${pages.length} page${pages.length === 1 ? '' : 's'} · ${formatSize(pdfBlob.size)}`;
+    if (!$('fname').value) $('fname').value = defaultName();
+    $('psize').value = getPageSize();
+    if (!$('result').open) $('result').showModal();
+  } catch (e) {
+    toast(e.message || 'Could not create the PDF.');
+  } finally {
+    for (const id of ['share', 'save']) $(id).disabled = false;
+    setBusy(false);
+  }
+}
+
+$('make').onclick = () => makePdf(false);
+
+$('psize').onchange = () => {
+  try { localStorage.setItem('pageSize', $('psize').value); } catch {}
+  makePdf(true);
+};
+
+function download(file) {
+  const url = URL.createObjectURL(file);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = file.name;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
+$('save').onclick = () => download(pdfFile());
+
+$('share').onclick = async () => {
+  const file = pdfFile();
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], title: file.name });
+    } catch (e) {
+      if (e.name !== 'AbortError') toast('Sharing failed — use Save PDF and attach it to your email.');
+    }
+    return;
+  }
+  // No file sharing in this browser: save the PDF and open a blank email to attach it to.
+  download(file);
+  toast('PDF saved — attach it to the email that opens.');
+  setTimeout(() => { location.href = 'mailto:?subject=' + encodeURIComponent(file.name.replace(/\.pdf$/i, '')); }, 800);
+};
+
+$('resClose').onclick = () => $('result').close();
+
+addEventListener('beforeunload', e => { if (pages.length) e.preventDefault(); });
+
+update();
+</script>
+</body>
+</html>
